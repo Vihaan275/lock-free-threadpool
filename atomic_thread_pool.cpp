@@ -11,28 +11,36 @@ struct WorkerQueue{
 
     std::function<void()> worker_queue[1024];
 
+    WorkerQueue(){
+        head.store(0,std::memory_order_release);
+        tail.store(0,std::memory_order_release);
+    }
 
     void add_task_from_tail(std::function<void()> task){
-        worker_queue[tail] = task;
-        tail++;
-        tail = tail%1024;//turns array into circular queue
+        while ((tail.load(std::memory_order_acquire)-head.load(std::memory_order_acquire)==1024)) {}
+
+        worker_queue[tail%1024] = task;
+        tail.store(tail+1,std::memeory_order_release);
     }
                     
-    std::function<void()> get_head_and_pop(){
-        std::function<void()> task = worker_queue[head];
-        head++;
-        head = head%1024;
+    std::optional<std::function<void()>> get_head_and_pop(){
+        int expected = head.load(std::memory_order_acquire);
+        while(!(head.compare_exchange_weak(expected,expected+1,std::memory_order_acq_rel,std::memory_order_relaxed) {
+
+            if (head.load(std::memory_order_acquire)==tail.load(std::memory_order_acquire)){
+
+               return std::nullopt;
+            }
+        }
+
+        auto task = worker_queue[(expected)%1024];
+
         return task;
     }
 
-    void add_task_from_head(std::function<void()> task){
-        head--;
-        head = head%1024;//turns array into circular queue
-        worker_queue[head] = task;
-    }
 
     bool is_empty(){
-        if (head.load()==tail.load()){
+        if (head.load(std::memory_order_acquire)==tail.load(std::memory_order_acquire)){
             return true;
         }
 
@@ -58,7 +66,7 @@ private:
 
     if (!(thread_queue->is_empty())){//if there are tasks in the work queue
 
-        auto task = thread_queue->get_head_and_pop();
+        auto task = (thread_queue)->get_head_and_pop();
         task();
     }
     }
@@ -68,7 +76,8 @@ public:
         queues.reserve(n);
         total_num_of_threads = n;
         for (int i=0;i<n;i++){
-            queues.emplace_back();
+            std::unique_ptr<WorkerQueue> ptr = std::make_unique<WorkerQueue>();
+            queues.push_back(std::move(ptr));
             //making the relevant task queue for each thread
 
             workers.push_back(std::thread(&threadpool::thread_work,this,i,queues[i].get()));
@@ -90,14 +99,10 @@ public:
     }
 
     void kill_tp(){
-        for (auto &i:workers){
-            i.join();
+        for (int i=0;i<workers.size();i++){
+            workers[i].join();
         }
     }
-
-        
-
-
 
 };
 
@@ -115,6 +120,10 @@ void foo(){
 int main(){
 
     threadpool obj(2);
+    obj.add_task(foo);
+    obj.add_task(foo);
+    obj.add_task(foo);
+    obj.add_task(foo);
     obj.kill_tp();
 
 }
