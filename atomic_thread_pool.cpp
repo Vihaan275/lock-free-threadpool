@@ -3,6 +3,9 @@
 #include <vector>
 #include <thread>
 #include <functional>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
 
 
 struct WorkerQueue{
@@ -20,12 +23,16 @@ struct WorkerQueue{
         while ((tail.load(std::memory_order_acquire)-head.load(std::memory_order_acquire)==1024)) {}
 
         worker_queue[tail%1024] = task;
-        tail.store(tail+1,std::memeory_order_release);
+        tail.store(tail+1,std::memory_order_release);
     }
                     
     std::optional<std::function<void()>> get_head_and_pop(){
+        if (head.load(std::memory_order_acquire)==tail.load(std::memory_order_acquire)){
+
+           return std::nullopt;
+        }
         int expected = head.load(std::memory_order_acquire);
-        while(!(head.compare_exchange_weak(expected,expected+1,std::memory_order_acq_rel,std::memory_order_relaxed) {
+        while(!(head.compare_exchange_weak(expected,expected+1,std::memory_order_acq_rel,std::memory_order_relaxed))) {
 
             if (head.load(std::memory_order_acquire)==tail.load(std::memory_order_acquire)){
 
@@ -46,6 +53,8 @@ struct WorkerQueue{
 
         return false;
     }
+
+
 };
 
 class threadpool{
@@ -55,21 +64,43 @@ private:
     //represents the task queue of each thread that other threads can see and steal from 
     std::vector<std::thread> workers;
     //just the workers 
+    
 
     int task_index=0;
     int total_num_of_threads;
+    std::mutex mute;
+    std::condition_variable cv;
+
+    std::atomic<bool> stop{false};
 
 
     void thread_work(int index, WorkerQueue* thread_queue){
     //index represents the index of the thread's worker queue in queues
     //WorkerQueue thread_queue = queues[index];
+        while(true){
 
-    if (!(thread_queue->is_empty())){//if there are tasks in the work queue
+        auto task = (thread_queue->get_head_and_pop());
+        if (task){
+            (*task)();
+        }
+        else{
 
-        auto task = (thread_queue)->get_head_and_pop();
-        task();
+            std::unique_lock<std::mutex> mut_lock(mute);
+            //CV is only basically to let a thread wait if there are no tasks
+            cv.wait(mut_lock, [&] {return !thread_queue->is_empty() || stop.load(std::memory_order_acquire);});
+
+            if (stop && thread_queue->is_empty()){
+                return;
+            }
+            mut_lock.unlock();
+
+            continue;
+            
+        }
+        }
     }
-    }
+
+    //if done with your own work queue, randomly choose another queue and try to steal its work 
 
 public:
     threadpool(int n){
@@ -92,6 +123,8 @@ public:
         //owner thread pushes with a round robin style to a thread's workerQueues end
         queues[task_index]->add_task_from_tail(task);
 
+        cv.notify_all();
+
         //changing task_index
         if (++task_index == total_num_of_threads){
             task_index=0;
@@ -99,10 +132,19 @@ public:
     }
 
     void kill_tp(){
-        for (int i=0;i<workers.size();i++){
-            workers[i].join();
-        }
+        int count=0;
+        int joined_threads=0;
+
+        stop.store(true,std::memory_order_release);
+        while(joined_threads<total_num_of_threads){
+                if(workers[count%total_num_of_threads].joinable()){
+                workers[count%total_num_of_threads].join();
+                joined_threads++;
+                }
+            count++;
     }
+    }
+    
 
 };
 
@@ -119,7 +161,12 @@ void foo(){
 
 int main(){
 
-    threadpool obj(2);
+    threadpool obj(4);
+    obj.add_task(foo);
+    obj.add_task(foo);
+    obj.add_task(foo);
+    obj.add_task(foo);
+    obj.add_task(foo);
     obj.add_task(foo);
     obj.add_task(foo);
     obj.add_task(foo);
