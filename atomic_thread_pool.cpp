@@ -20,16 +20,16 @@ struct WorkerQueue{
     }
 
     void add_task_from_tail(std::function<void()> task){
-        while ((tail.load(std::memory_order_acquire)-head.load(std::memory_order_acquire)==1024)) {}
+        while ((tail.load(std::memory_order_relaxed)-head.load(std::memory_order_acquire)==1024)) {}
 
         worker_queue[tail%1024] = task;
-        tail.store(tail+1,std::memory_order_release);
+        tail.fetch_add(1,std::memory_order_release);
     }
                     
     std::optional<std::function<void()>> get_head_and_pop(){
         if (head.load(std::memory_order_acquire)==tail.load(std::memory_order_acquire)){
+            return std::nullopt;
 
-           return std::nullopt;
         }
         int expected = head.load(std::memory_order_acquire);
         while(!(head.compare_exchange_weak(expected,expected+1,std::memory_order_acq_rel,std::memory_order_relaxed))) {
@@ -40,7 +40,7 @@ struct WorkerQueue{
             }
         }
 
-        auto task = worker_queue[(expected)%1024];
+        auto task = std::move(worker_queue[(expected)%1024]);
 
         return task;
     }
@@ -79,20 +79,44 @@ private:
     //WorkerQueue thread_queue = queues[index];
         while(true){
 
+        if(!(thread_queue->is_empty())){
         auto task = (thread_queue->get_head_and_pop());
         if (task){
             (*task)();
         }
-        else{
+        }
+        else{// if we dont have tasks in our queue
+
+
+            int count = (index+1)%total_num_of_threads;
+            while(count%total_num_of_threads !=index){
+
+
+                        WorkerQueue* new_queue = queues[count%total_num_of_threads].get();
+                        while (!(new_queue->is_empty())){
+                            auto task = new_queue->get_head_and_pop();
+                            if (task){
+                                (*task)();
+                            }
+                            else{
+                                break;
+                            }
+                        }
+
+                count++;
+                }
+
+            
+            //all threads basically try to finish all other tasks till they reach back to their own thread, and then they wait on the condition variable. 
 
             std::unique_lock<std::mutex> mut_lock(mute);
             //CV is only basically to let a thread wait if there are no tasks
             cv.wait(mut_lock, [&] {return !thread_queue->is_empty() || stop.load(std::memory_order_acquire);});
+            mut_lock.unlock();
 
             if (stop && thread_queue->is_empty()){
                 return;
             }
-            mut_lock.unlock();
 
             continue;
             
@@ -136,7 +160,9 @@ public:
         int joined_threads=0;
 
         stop.store(true,std::memory_order_release);
+        cv.notify_all();
         while(joined_threads<total_num_of_threads){
+            if (queues[count%total_num_of_threads]->is_empty()){
                 if(workers[count%total_num_of_threads].joinable()){
                 workers[count%total_num_of_threads].join();
                 joined_threads++;
@@ -144,7 +170,7 @@ public:
             count++;
     }
     }
-    
+    } 
 
 };
 
