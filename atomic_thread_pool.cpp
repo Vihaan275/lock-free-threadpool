@@ -165,15 +165,9 @@ public:
 
         stop.store(true,std::memory_order_release);
         cv.notify_all();
-        while(joined_threads<total_num_of_threads){
-            if (queues[count%total_num_of_threads]->is_empty()){
-                if(workers[count%total_num_of_threads].joinable()){
-                workers[count%total_num_of_threads].join();
-                joined_threads++;
-                }
-            count++;
-    }
-    }
+        for (auto& i:workers){
+            i.join();
+        }
     } 
 
 };
@@ -181,15 +175,13 @@ public:
 
 
 void foo(){
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     std::cout<<"Done"<<std::endl;
 }
 
 int main(){
 
-    threadpool obj(9);
-    obj.add_task(foo);
-    obj.add_task(foo);
+    threadpool obj(3);
     obj.add_task(foo);
     obj.add_task(foo);
     obj.add_task(foo);
