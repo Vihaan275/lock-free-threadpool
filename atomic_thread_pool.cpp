@@ -1,4 +1,5 @@
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -135,6 +136,9 @@ public:
             queues.push_back(std::move(ptr));
             //making the relevant task queue for each thread
 
+        }
+        
+        for (int i=0;i<n;i++){
             workers.push_back(std::thread(&threadpool::thread_work,this,i,queues[i].get()));
             //initialize workers while also passing their queue index
         }
@@ -177,17 +181,13 @@ public:
 
 
 void foo(){
-    int s = 4;
-    for (int i=0;i<1000;i++){
-        s++;
-    }
-
-    std::cout<<s<<std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::cout<<"Done"<<std::endl;
 }
 
 int main(){
 
-    threadpool obj(4);
+    threadpool obj(9);
     obj.add_task(foo);
     obj.add_task(foo);
     obj.add_task(foo);
