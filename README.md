@@ -37,6 +37,7 @@ The queue uses acquire/release semantics throughout rather than `seq_cst`, which
 ## Benchmark
 
 Thread    time taken
+
 1     : 0.012608885
 2     : 0.008565020
 4     : 0.004568422
