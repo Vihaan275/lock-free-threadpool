@@ -36,14 +36,15 @@ The queue uses acquire/release semantics throughout rather than `seq_cst`, which
 
 ## Benchmark
 
-Thread    time taken
+1000 tasks, each incrementing a counter to 10,000. Measured wall-clock time via `std::chrono`. Run on Intel I7.
 
-1     : 0.012608885
-2     : 0.008565020
-4     : 0.004568422
-6     : 0.003873010
-8     : 0.002527693
-
+| Threads | Time (s)  | Speedup vs 1 thread |
+|---------|-----------|---------------------|
+| 1       | 0.012609  | 1.00×               |
+| 2       | 0.008565  | 1.47×               |
+| 4       | 0.004568  | 2.76×               |
+| 6       | 0.003873  | 3.26×               |
+| 8       | 0.002528  | 4.99×               |
 
 Profiled with `perf stat` to confirm work was distributed across cores and no single queue became a bottleneck under load.
 
